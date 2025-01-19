@@ -21,8 +21,6 @@ jobs:
 
       # Automate Pull Requests
       - name: Automate Pull Requests
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for i in {1..2} # Adjust this range to create the desired number of PRs
           do
@@ -44,23 +42,20 @@ jobs:
 
             echo "Merged pull request #: $count" > $tracker_file
 
-            # Add and commit the tracker file with the correct author
+            # Add and commit the tracker file
             git add $tracker_file
-            git commit -m "Update merged PR count to #$count" --author "Chris Banas <bananas595@gmail.com>"
+            git commit -m "Update merged PR count to #$count"
 
             # Push the branch
             git push origin $branch_name
 
-            # Create a pull request
-            pr_url=$(gh pr create --base main --head $branch_name --title "Update merged PR count to #$count" --body "This PR updates the count of merged pull requests to $count.")
-
-            # Merge the pull request
-            gh pr merge $pr_url --merge --admin
-
-            # Fetch and update the main branch
+            # Merge the branch into main
             git fetch origin main
             git checkout main
-            git reset --hard origin/main
+            git merge --no-ff $branch_name -m "Merge branch '$branch_name' into main"
+
+            # Push the updated main branch
+            git push origin main
 
             # Delete the branch locally and remotely
             git branch -d $branch_name
