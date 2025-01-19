@@ -13,7 +13,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # Set up Git configuration. Put your info here
+      # Set up Git configuration
       - name: Set Up Git
         run: |
           git config --global user.name "chrisbanas"
@@ -24,7 +24,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          for i in {1..1024} # Adjust this range to create the desired number of PRs (Set to gold badge)
+          for i in {1..2} # Adjust this range to create the desired number of PRs
           do
             branch_name="automated-branch-$i"
             tracker_file="merged_prs.txt"
@@ -44,9 +44,9 @@ jobs:
 
             echo "Merged pull request #: $count" > $tracker_file
 
-            # Add and commit the tracker file
+            # Add and commit the tracker file with the correct author
             git add $tracker_file
-            git commit -m "Update merged PR count to #$count"
+            git commit -m "Update merged PR count to #$count" --author "Chris Banas <bananas595@gmail.com>"
 
             # Push the branch
             git push origin $branch_name
