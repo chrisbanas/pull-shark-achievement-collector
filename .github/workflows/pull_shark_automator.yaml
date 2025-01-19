@@ -7,16 +7,19 @@ jobs:
   create_and_merge_prs:
     runs-on: ubuntu-latest
     steps:
+      # Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v3
         with:
           fetch-depth: 0
 
+      # Set up Git configuration
       - name: Set Up Git
         run: |
           git config --global user.name "chrisbanas"
           git config --global user.email "bananas595@gmail.com"
 
+      # Automate Pull Requests
       - name: Automate Pull Requests
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -54,8 +57,12 @@ jobs:
             # Merge the pull request
             gh pr merge $pr_url --merge --admin
 
-            # Delete the branch locally and remotely
+            # Fetch and update the main branch
+            git fetch origin main
             git checkout main
+            git reset --hard origin/main
+
+            # Delete the branch locally and remotely
             git branch -d $branch_name
             git push origin --delete $branch_name
 
