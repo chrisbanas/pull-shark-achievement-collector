@@ -23,13 +23,16 @@ jobs:
           sudo apt-get install -y gh
 
       # Step 4: Authenticate with GitHub CLI
-      - name: Authenticate GitHub CLI
-        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+      - name: Authenticate GitHub CLI as User
+        env:
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | gh auth login --with-token
 
-      # Step 5: Create and Merge Pull Requests
+      # Step 5: Create and Merge PRs
       - name: Automate PR Creation and Merging
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         run: |
           for i in {1..10} # Adjust the range as needed
           do
@@ -46,9 +49,11 @@ jobs:
             git push origin $branch_name
 
             # Step 5.3: Create a PR using gh CLI
-            pr_url=$(gh pr create --base main --head $branch_name --title "Automated PR #$i" --body "This is an automated pull request created by GitHub Actions.")
+            pr_url=$(gh pr create --base main --head $branch_name \
+              --title "Automated PR #$i" \
+              --body "This is an automated pull request created by GitHub Actions.")
 
-            # Step 5.4: Merge the PR
+            # Step 5.4: Merge the PR using gh CLI
             gh pr merge --squash --delete-branch --admin $pr_url
 
             # Optional: Sleep to avoid rate limits
