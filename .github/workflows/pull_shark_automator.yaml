@@ -1,4 +1,4 @@
-name: Automate Pull Requests for Pull Shark Badge
+name: Automate Pull Requests and Merge
 
 on:
   workflow_dispatch:
@@ -7,60 +7,50 @@ jobs:
   create_and_merge_prs:
     runs-on: ubuntu-latest
     steps:
-      # Checkout the repository
+      # Step 1: Checkout the repository
       - name: Checkout Repository
         uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
 
-      # Set up Git configuration
+      # Step 2: Set up Git
       - name: Set Up Git
         run: |
           git config --global user.name "chrisbanas"
           git config --global user.email "bananas595@gmail.com"
 
-      # Automate Pull Requests
-      - name: Automate Pull Requests
+      # Step 3: Install GitHub CLI
+      - name: Install GitHub CLI
         run: |
-          for i in {1..1024} # Adjust this range to create the desired number of PRs
+          sudo apt-get install -y gh
+
+      # Step 4: Authenticate with GitHub CLI
+      - name: Authenticate GitHub CLI
+        run: gh auth login --with-token <<< "${{ secrets.GITHUB_TOKEN }}"
+
+      # Step 5: Create and Merge Pull Requests
+      - name: Automate PR Creation and Merging
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for i in {1..10} # Adjust the range as needed
           do
             branch_name="automated-branch-$i"
             tracker_file="merged_prs.txt"
 
-            # Create a new branch
+            # Step 5.1: Create a new branch
             git checkout -b $branch_name
 
-            # Update or initialize the tracker file
-            if [ -f "$tracker_file" ]; then
-              # Increment the count in the tracker file
-              count=$(grep -oE '[0-9]+' $tracker_file)
-              count=$((count + 1))
-            else
-              # Initialize the tracker file
-              count=1
-            fi
-
-            echo "Merged pull request #: $count" > $tracker_file
-
-            # Add and commit the tracker file
+            # Step 5.2: Update a file to simulate changes
+            echo "Merged pull request #: $i" >> $tracker_file
             git add $tracker_file
-            git commit -m "Update merged PR count to #$count"
-
-            # Push the branch
+            git commit -m "Update merged PR count to #$i"
             git push origin $branch_name
 
-            # Merge the branch into main
-            git fetch origin main
-            git checkout main
-            git merge --no-ff $branch_name -m "Merge branch '$branch_name' into main"
+            # Step 5.3: Create a PR using gh CLI
+            pr_url=$(gh pr create --base main --head $branch_name --title "Automated PR #$i" --body "This is an automated pull request created by GitHub Actions.")
 
-            # Push the updated main branch
-            git push origin main
+            # Step 5.4: Merge the PR
+            gh pr merge --squash --delete-branch --admin $pr_url
 
-            # Delete the branch locally and remotely
-            git branch -d $branch_name
-            git push origin --delete $branch_name
-
-            # Optional: Sleep to avoid rate limits or conflicts
+            # Optional: Sleep to avoid rate limits
             sleep $((RANDOM % 3 + 1))
           done
