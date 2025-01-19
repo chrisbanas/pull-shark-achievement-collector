@@ -22,7 +22,7 @@ jobs:
       # Automate Pull Requests
       - name: Automate Pull Requests
         run: |
-          for i in {1..2} # Adjust this range to create the desired number of PRs
+          for i in {1..1024} # Adjust this range to create the desired number of PRs
           do
             branch_name="automated-branch-$i"
             tracker_file="merged_prs.txt"
