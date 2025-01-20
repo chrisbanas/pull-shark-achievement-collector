@@ -48,11 +48,14 @@ jobs:
             git add $tracker_file
             git commit -m "Update merged PR count to #$i"
 
-            # Step 5.3: Handle potential conflicts during push
-            git fetch origin $branch_name || true
-            git rebase origin/$branch_name || true
+            # Step 5.3: Push branch to remote and handle conflicts
+            if git ls-remote --heads origin $branch_name | grep -q $branch_name; then
+              echo "Branch $branch_name already exists. Fetching remote changes..."
+              git fetch origin $branch_name
+              git rebase origin/$branch_name || git rebase --abort
+            fi
 
-            # Force-push to resolve conflicts, if necessary
+            # Push the branch (force if needed)
             git push origin $branch_name || git push origin $branch_name --force
 
             # Step 5.4: Create a PR using gh CLI
@@ -64,6 +67,7 @@ jobs:
             gh pr merge --squash --delete-branch --admin $pr_url
 
             # Step 5.6: Sleep to avoid rate limits
-            echo "Sleeping for 10 seconds to avoid rate limits..."
-            sleep 10
+            delay=$((RANDOM % 5 + 10)) # Random delay between 10-15 seconds
+            echo "Sleeping for $delay seconds to avoid rate limits..."
+            sleep $delay
           done
