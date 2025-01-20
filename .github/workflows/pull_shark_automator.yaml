@@ -30,7 +30,7 @@ jobs:
         run: |
           echo "${{ secrets.PERSONAL_ACCESS_TOKEN }}" | gh auth login --with-token
 
-      # Step 5: Create and Merge PRs
+      # Step 5: Create and Merge PRs with Conflict Handling
       - name: Automate PR Creation and Merging
         env:
           GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
@@ -47,17 +47,23 @@ jobs:
             echo "Merged pull request #: $i" >> $tracker_file
             git add $tracker_file
             git commit -m "Update merged PR count to #$i"
-            git push origin $branch_name
 
-            # Step 5.3: Create a PR using gh CLI
+            # Step 5.3: Handle potential conflicts during push
+            git fetch origin $branch_name || true
+            git rebase origin/$branch_name || true
+
+            # Force-push to resolve conflicts, if necessary
+            git push origin $branch_name || git push origin $branch_name --force
+
+            # Step 5.4: Create a PR using gh CLI
             pr_url=$(gh pr create --base main --head $branch_name \
               --title "Automated PR #$i" \
               --body "This is an automated pull request created by GitHub Actions.")
 
-            # Step 5.4: Merge the PR using gh CLI
+            # Step 5.5: Merge the PR using gh CLI
             gh pr merge --squash --delete-branch --admin $pr_url
 
-            # Step 5.5: Sleep to avoid rate limits
+            # Step 5.6: Sleep to avoid rate limits
             echo "Sleeping for 10 seconds to avoid rate limits..."
             sleep 10
           done
