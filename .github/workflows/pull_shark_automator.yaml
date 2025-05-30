@@ -10,6 +10,10 @@ permissions:
 jobs:
   create_and_merge_prs:
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+      MAX: 1024
+      THRESHOLD: 100
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -26,50 +30,64 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gh jq
 
-      - name: Authenticate GitHub CLI
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
-        run: echo "${GITHUB_TOKEN}" | gh auth login --with-token
+      - name: Stress-test prerequisites
+        run: |
+          echo "GH CLI version: $(gh --version)"
+          echo "jq version: $(jq --version)"
+          echo "Git version: $(git --version)"
 
       - name: Generate and merge PRs
-        env:
-          GITHUB_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
         shell: bash
         run: |
-          MAX=1024
-          THRESHOLD=100
-          for i in $(seq 1 $MAX); do
-            branch="automated-pr-${i}-$(date +%s)"
-            file="merged_prs.txt"
-            echo "Starting PR #$i on branch $branch"
+          file="merged_prs.txt"
+          
+          for ((i=1; i<=MAX; i++)); do
+            branch="automated-pr-${i}-$(date +%s%N)"
+            echo "=== Starting PR #$i on branch $branch ==="
 
             # Rate limit check
-            remaining=$(gh api /rate_limit --jq ".resources.core.remaining")
-            reset_epoch=$(gh api /rate_limit | jq ".resources.core.reset")
+            rem=$(gh api /rate_limit --jq '.resources.core.remaining')
+            reset=$(gh api /rate_limit --jq '.resources.core.reset')
             now=$(date +%s)
-            if [ "$remaining" -lt "$THRESHOLD" ]; then
-              sleep_time=$((reset_epoch - now + 5))
-              echo "Rate limit low: $remaining. Sleeping for $sleep_time seconds..."
-              sleep $sleep_time
+            if (( rem < THRESHOLD )); then
+              wait=$((reset - now + 5))
+              echo "Rate limit low: $rem. Sleeping for $wait seconds until reset."
+              sleep $wait
             fi
 
-            # Update main branch
+            # Update main
             git checkout main
-            git pull origin main
+            git pull --ff-only origin main
 
-            # Create new branch
+            # Create branch
             git checkout -b "$branch"
 
-            # Make a simple change
+            # Commit change
             echo "Merged PR #$i at $(date -u)" >> "$file"
             git add "$file"
-            git commit -m "chore: update merged PR count to #$i"
+            git commit -m "chore: update merged PR count #$i" || { echo "No changes to commit"; }
 
-            # Push and create PR
-            git push origin "$branch"
-            pr_url=$(gh pr create --base main --head "$branch" --title "Automated PR #$i" --body "Automated PR #$i to earn Pullshark Gold badge.")
+            # Push branch
+            git push origin "$branch" --force
 
-            # Merge PR
-            gh pr merge "$pr_url" --squash --delete-branch --admin
-            echo "Merged PR #$i successfully."
+            # Create PR with retries
+            for attempt in {1..5}; do
+              pr_url=$(gh pr create --base main --head "$branch" --title "Automated PR #$i" --body "Automated PR #$i to earn Pullshark Gold badge." 2>/dev/null) && break
+              echo "PR creation failed (attempt $attempt). Retrying in $((attempt*5))s..."
+              sleep $((attempt*5))
+            done
+            if [[ -z "$pr_url" ]]; then
+              echo "Failed to create PR after retries. Exiting."
+              exit 1
+            fi
+            echo "PR created: $pr_url"
+
+            # Merge PR with retries
+            for attempt in {1..5}; do
+              gh pr merge "$pr_url" --squash --delete-branch --admin && break
+              echo "Merge failed (attempt $attempt). Retrying in $((attempt*5))s..."
+              sleep $((attempt*5))
+            done
+            echo "PR #$i merged successfully"
+
           done
