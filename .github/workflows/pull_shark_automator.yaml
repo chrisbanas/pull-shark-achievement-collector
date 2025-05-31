@@ -13,7 +13,8 @@ jobs:
     env:
       GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
       MAX: 1024
-      THRESHOLD: 100
+      CORE_THRESHOLD: 200
+      ITERATION_DELAY: 30   # seconds between iterations to help avoid rate limits
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
@@ -40,54 +41,100 @@ jobs:
         shell: bash
         run: |
           file="merged_prs.txt"
-          
+
           for ((i=1; i<=MAX; i++)); do
             branch="automated-pr-${i}-$(date +%s%N)"
             echo "=== Starting PR #$i on branch $branch ==="
 
-            # Rate limit check
-            rem=$(gh api /rate_limit --jq '.resources.core.remaining')
-            reset=$(gh api /rate_limit --jq '.resources.core.reset')
-            now=$(date +%s)
-            if (( rem < THRESHOLD )); then
-              wait=$((reset - now + 5))
-              echo "Rate limit low: $rem. Sleeping for $wait seconds until reset."
+            # Wait until core rate limit is above threshold
+            while true; do
+              core_rem=$(gh api /rate_limit --jq '.resources.core.remaining')
+              reset_time=$(gh api /rate_limit --jq '.resources.core.reset')
+              now=$(date +%s)
+              if (( core_rem > CORE_THRESHOLD )); then
+                break
+              fi
+              wait=$((reset_time - now + 5))
+              echo "Core rate limit low ($core_rem). Sleeping $wait seconds until reset..."
               sleep $wait
-            fi
+            done
 
             # Update main
             git checkout main
             git pull --ff-only origin main
 
-            # Create branch
+            # Create and switch to new branch
             git checkout -b "$branch"
 
-            # Commit change
+            # Commit a simple change
             echo "Merged PR #$i at $(date -u)" >> "$file"
             git add "$file"
-            git commit -m "chore: update merged PR count #$i" || { echo "No changes to commit"; }
+            git commit -m "chore: update merged PR count #$i" || echo "No changes to commit"
 
             # Push branch
-            git push origin "$branch" --force
+            git push origin "$branch" --force || {
+              echo "Push failed. Retrying in 15s..."
+              sleep 15
+              git push origin "$branch" --force || echo "Push still failing, continuing iteration..."
+            }
 
-            # Create PR with retries
-            for attempt in {1..5}; do
-              pr_url=$(gh pr create --base main --head "$branch" --title "Automated PR #$i" --body "Automated PR #$i to earn Pullshark Gold badge." 2>/dev/null) && break
-              echo "PR creation failed (attempt $attempt). Retrying in $((attempt*5))s..."
-              sleep $((attempt*5))
+            # Create PR with infinite retries until success
+            pr_url=""
+            while [[ -z "$pr_url" ]]; do
+              # Check search rate limit (used by gh pr create internally)
+              search_rem=$(gh api /rate_limit --jq '.resources.search.remaining')
+              if (( search_rem < 10 )); then
+                reset_time=$(gh api /rate_limit --jq '.resources.search.reset')
+                now=$(date +%s)
+                wait=$((reset_time - now + 5))
+                echo "Search rate limit low ($search_rem). Sleeping $wait seconds until reset..."
+                sleep $wait
+                continue
+              fi
+
+              # Attempt PR creation
+              output=$(gh pr create --base main --head "$branch" --title "Automated PR #$i" --body "Automated PR #$i to earn Pullshark Gold badge." 2>&1) && pr_url="$output" || true
+              if [[ -z "$pr_url" ]]; then
+                if echo "$output" | grep -qi "rate limit"; then
+                  # Extract reset from core limit and sleep
+                  reset_time=$(gh api /rate_limit --jq '.resources.core.reset')
+                  now=$(date +%s)
+                  wait=$((reset_time - now + 5))
+                  echo "PR creation rate-limited. Sleeping $wait seconds..."
+                  sleep $wait
+                else
+                  echo "PR creation error: $output"
+                  echo "Retrying in 20s..."
+                  sleep 20
+                fi
+              fi
             done
-            if [[ -z "$pr_url" ]]; then
-              echo "Failed to create PR after retries. Exiting."
-              exit 1
-            fi
             echo "PR created: $pr_url"
 
-            # Merge PR with retries
-            for attempt in {1..5}; do
-              gh pr merge "$pr_url" --squash --delete-branch --admin && break
-              echo "Merge failed (attempt $attempt). Retrying in $((attempt*5))s..."
-              sleep $((attempt*5))
+            # Merge PR with infinite retries until success
+            merged="false"
+            while [[ "$merged" != "true" ]]; do
+              merge_output=$(gh pr merge "$pr_url" --squash --delete-branch --admin 2>&1) && merged="true" || true
+              if [[ "$merged" != "true" ]]; then
+                if echo "$merge_output" | grep -qi "rate limit"; then
+                  reset_time=$(gh api /rate_limit --jq '.resources.core.reset')
+                  now=$(date +%s)
+                  wait=$((reset_time - now + 5))
+                  echo "Merge rate-limited. Sleeping $wait seconds..."
+                  sleep $wait
+                else
+                  echo "PR merge error: $merge_output"
+                  echo "Retrying in 20s..."
+                  sleep 20
+                fi
+              fi
             done
             echo "PR #$i merged successfully"
 
+            # Delay before next iteration
+            echo "Sleeping $ITERATION_DELAY seconds before next iteration..."
+            sleep $ITERATION_DELAY
+
           done
+
+          echo "All $MAX PRs processed."
